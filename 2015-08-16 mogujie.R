@@ -37,10 +37,14 @@ if (T){
 }
 
 #make sure the previous and the current date
-#
+#month report: we use the latest 4weeks
+#================================================================
+#IMPORTANT: Mogujie can only calcualte 90days deals and GMV
+#           So period shoud be 90days
 
-previous=as.Date("2015-07-05")
-current=as.Date("2015-08-02")
+#previous:90days ago, here we use last month for test
+(previous=as.Date(as.Date("2015-07-06"):as.Date("2015-08-02")))
+(current=as.Date(as.Date("2015-08-03"):as.Date("2015-08-09")))
 
 
 #----------------------------------------------------------------------------------------------
@@ -55,10 +59,11 @@ if (T){
   
 
   #-----------------------------------------
-  #Read SKU
-  sku=dbGetQuery(conn,"select * from simple_mogujie_item where date>20150705 and date<=(20150811)")
+  #Read SKU: >last(previous)  <=last(current)
+  sku=dbGetQuery(conn,"select * from simple_mogujie_item where date>20150802 and date<=20150809")
+  #Read the glastxxx: <=last(previous)
   glastsku=dbGetQuery(conn,"select itemid, date, cfav, sale, price, items, cmtn, storeid
-                      from (select * from simple_mogujie_item where date<=20150705 order by date desc) as sku group by itemid order by date desc")
+                      from (select * from simple_mogujie_item where date<=20150802 order by date desc) as sku group by itemid order by date desc")
   
   table(sku$date)
   names(sku)=c("kid","type1","type2","tid2","gid","gname","flag","likes","sales","created","price","atid","promotion","date","COGS", "grade","cmts","sid","originprice")
@@ -78,10 +83,10 @@ if (T){
   #Read store
   #store=dbGetQuery(conn,"select * from simple_mogujie_store where date>20150705 and date<=(20150811)")
   store=dbGetQuery(conn,"select *
-                      from (select * from simple_mogujie_store where date>20150705 and date<=(20150811) order by date desc) as store group by storeid order by date desc")
+                      from (select * from simple_mogujie_store where date>20150802 and date<=20150809 order by date desc) as store group by storeid order by date desc")
   
   glaststore=dbGetQuery(conn,"select storeid, date, fans, items, avgtime, cplts, rtns, sold, money, cmt2,cmt3, cmt4
-                      from (select * from simple_mogujie_store where date<=20150705 order by date desc) as store group by storeid order by date desc")
+                      from (select * from simple_mogujie_store where date<=20150802 order by date desc) as store group by storeid order by date desc")
   table(store$date)
   dim(glaststore)
   
@@ -95,10 +100,10 @@ if (T){
   
   
   #-----------------------------------------
-  #Read tuan
-  tuan=dbGetQuery(conn,"select * from simple_mogujie_tuan where date>=20150712 and date<=(20150811)")
+  #Read tuan:>last(previous) <=last(current)
+  tuan=dbGetQuery(conn,"select * from simple_mogujie_tuan where date>20150802 and date<=20150809")
   glasttuan=dbGetQuery(conn,"select *
-                        from (select * from simple_mogujie_tuan where date<20150712 order by date desc) as sku group by itemid order by date desc")
+                        from (select * from simple_mogujie_tuan where date<=20150802 order by date desc) as sku group by itemid order by date desc")
   table(tuan$date)
   table(glasttuan$date)
   
@@ -115,18 +120,18 @@ if (T){
   glasttuan$price=glasttuan$price/100
   
   dbDisconnect(conn)
-  save(file=paste(current,"mogujie.Rdata",sep="-"),sku, glastsku, glastsid, store, glaststore, tuan, glasttuan)
+  save(file=paste(first(current), last(current),"mogujie.Rdata",sep="-"),sku, glastsku, glastsid, store, glaststore, tuan, glasttuan)
 }
 
 
 #define 2 compared time spot
-load(file=paste(current,"mogujie.Rdata",sep="-"))
+load(file=paste(first(current), last(current),"mogujie.Rdata",sep="-"))
 
 
 
 #================================================
 # select the last season from date1 to date2
-skup=filter(glastsku,date==previous)   
+skup=filter(glastsku,date %in% previous)   
 sidp=distinct(select(skup,sid),sid)
 dim(glastsku)
 dim(skup)
@@ -134,7 +139,7 @@ dim(skup)
 
 
 #----------------------------------------------------------------------------------------------
-# Define the Macros Variables
+ # Define the Macros Variables
 
 (previous)
 (gdate=unique(sku$date))
@@ -143,7 +148,7 @@ dim(skup)
 (gcol=paste("m", 1:gnperiod, sep=""))
 (gcolx=paste("m", 1:gnperiod, ".x", sep=""))
 (gcoly=paste("m", 1:gnperiod, ".y", sep=""))
-(gfile=paste(previous+1,"to",max(gdate),"MoGuJie SKU Analysis By JX @", Sys.Date(),".xlsx",sep = " "))
+(gfile=paste(last(previous)+1,"to",max(gdate),"MoGuJie SKU Analysis By JX @", Sys.Date(),".xlsx",sep = " "))
 
 
 
@@ -164,7 +169,10 @@ sku_cast=function(sku, x, glastsku){
   xlist=left_join(xlist,glastsku[,c("gid", "date", x)],by=c("gid"="gid"))
   names(xlist)=c("gid",gcol,"lastdate","m0")
   xlist=select(xlist,gid,m0,starts_with("m"),lastdate)
-  xlist$numna=apply(xlist[,gcol],1,n_na)
+  xlist$numna=NA
+  if (gnperiod==1) xlist$numna=as.integer(is.na(xlist[,gcol]))
+  else xlist$numna=apply(xlist[,gcol],1,n_na)
+  
   if (x=="sales") xlist[,"D90deals"]= apply(xlist[,c("m0",gcol)],1, function(y){return((last(y[which(!is.na(y))])))})
   else if (x=="price") xlist[,"price"]= apply(xlist[,c("m0",gcol)],1, function(y){return(mean(y ,na.rm=T))})
   else {
@@ -218,7 +226,7 @@ table(dealist$status)
 skup$status=gstatus[1]
 skup[which(!(skup$gid %in% dealist$gid)),"status"]=gstatus[3]
 table(skup$status)
-head(dealist,10)
+
 
 #---------------------------------------------------------------------------
 # skub combine
@@ -270,11 +278,11 @@ skubsmr=data.frame(date=last(gdate),ngoods=nrow(skub),
                    ntype1=length(unique(skub$type1)),ntype2=length(unique(skub$tid2)),nstore=length(unique(skub$sid)),
                    classic=sum(skub$status==gstatus[1]), newgoods=sum(skub$status==gstatus[2]),offshelf=sum(skup$status==gstatus[3])
                   )
-knitr::kable(as.data.frame(skubsmr),caption="SKU Summary Overview Table")
+#knitr::kable(as.data.frame(skubsmr),caption="SKU Summary Overview Table")
 
-
+head(skubsmr)
 # Deals Top 10
-(top10=head(as.data.frame(skub[order(desc(skub$GMV)),]),100))
+top10=head(as.data.frame(skub[order(desc(skub$GMV)),]),100)
 top10=select(top10, gid, gname, status,type1, type2, sid,grade,  GMV, D90deals, price,totlikes, deltalikes, totcmts,deltacmts, totCOGS,deltaCOGS)
 knitr::kable(as.data.frame(top10),caption="SKU Deal Number Top10 Table")
 
@@ -365,7 +373,7 @@ skub=ungroup(skub)
 
 typelist=distinct(select(sku,type1,type2,tid2),type1,tid2)
 typelsit=arrange(typelist,type1,tid2)
-knitr::kable(typelist,caption="SKU Type List Table")
+#knitr::kable(typelist,caption="SKU Type List Table")
 write.xlsx(file=gfile,x=typelist,sheetName = "typelist", append = T, showNA = F)
 
 
@@ -398,15 +406,15 @@ if (T){
   skub=group_by(skub,sid)
   bywhat="sid"
   groupsmr=skuanalyze(skub,skup,bywhat)
-  as.data.frame(groupsmr)
+  head(as.data.frame(groupsmr))
   
   #knitr::kable(as.data.frame(groupsmr),caption=paste("SKU Analyzed By", bywhat, sep = " "))
 #  write.xlsx(file=gfile,x=t(groupsmr),sheetName = bywhat, append = T, showNA = F)
   skub=ungroup(skub)
   storesku=groupsmr
-  save(file=paste(previous,max(gdate),"groupby store.Rdata",sep="-"),storesku)
+  save(file=paste(last(previous)+1,max(gdate),"groupby store.Rdata",sep="-"),storesku)
 } else {
-  load(file=paste(previous,max(gdate),"groupby store.Rdata",sep="-"))
+  load(file=paste(last(previous)+1,max(gdate),"groupby store.Rdata",sep="-"))
   bywhat="sid"
 #  write.xlsx(file=gfile,x=t(storesku),sheetName = bywhat, append = T, showNA = F)
 }
@@ -435,7 +443,7 @@ head(store)
 (gcol=paste("m", 1:gnperiod, sep=""))
 (gcolx=paste("m", 1:gnperiod, ".x", sep=""))
 (gcoly=paste("m", 1:gnperiod, ".y", sep=""))
-(gfile=paste(previous+1,"to",max(gdate),"MoGuJie Store Analysis By JX @", Sys.Date(),".xlsx",sep = " "))
+(gfile=paste(last(previous)+1,"to",max(gdate),"MoGuJie Store Analysis By JX @", Sys.Date(),".xlsx",sep = " "))
 
 
 storeb=select(store,-grade1,-kid)
@@ -455,8 +463,8 @@ storeb=select(storeb,date,sid, sname, city, grade2, grade3, grade4, created, aut
 storeb=left_join(storeb, select(storesku, sid,D90deals, D90GMV=GMV, COGS=totCOGS), by=c("sid"="sid"))
 storeb$created=as.Date(storeb$created)
 storeb[,"status"]=gstatus[1]
-storeb[which(storeb$created>previous & storeb$created<=last(gdate)),"status"]=gstatus[2]
-storepre=filter(glaststore, date<=previous)
+storeb[which(storeb$created>last(previous) & storeb$created<=last(gdate)),"status"]=gstatus[2]
+storepre=filter(glaststore, date %in% previous)
 if (nrow(storepre)>0) {
   storepre$status=gstatus[1]
   storepre[which(!(storepre$sid %in% storeb$sid)),"status"]=gstatus[3]
@@ -519,29 +527,29 @@ storeanalyze=function(storeb,storepre,bywhat){
   
   groupsmr$date=last(gdate)
   return(groupsmr)
-}
+} 
 
 storeb=group_by(storeb,status)
 bywhat="status"
 groupsmr=storeanalyze(storeb,storepre,bywhat)
-as.data.frame(groupsmr)
+head(as.data.frame(groupsmr))
 
 write.xlsx(file=gfile,x=t(groupsmr),sheetName = "status", append = T, showNA = F)
 
 
-(top10=head(as.data.frame(storeb[order(desc(storeb$totdeals)),]),100))
-knitr::kable(as.data.frame(top10),caption="Store totdeals Top10 Table")
+top10=head(as.data.frame(storeb[order(desc(storeb$totdeals)),]),100)
+#knitr::kable(as.data.frame(top10),caption="Store totdeals Top10 Table")
 write.xlsx(file=gfile,x=top10,sheetName = "store totdeals top100", append = T, showNA = F)
 
-storecur=ungroup(storecur)
+storeb=ungroup(storeb)
 top10=head(as.data.frame(arrange(storeb[which(storeb$status==gstatus[1]),],desc(totdeals))),100)
-knitr::kable(as.data.frame(top10),caption="Classical Store GMV Top10 Table")
+#knitr::kable(as.data.frame(top10),caption="Classical Store GMV Top10 Table")
 write.xlsx(file=gfile,x=top10,sheetName = "classic ndeal top100", append = T, showNA = F)
 
-storecur=ungroup(storecur)
+storeb=ungroup(storeb)
 top10=head(as.data.frame(arrange(storeb[which(storeb$status==gstatus[2]),],desc(totdeals))),100)
 knitr::kable(as.data.frame(top10),caption="New ndeals Top10 Table")
-write.xlsx(file=gfile,x=top10,sheetName = "New ndeals top100", append = T, showNA = F)
+if (nrow(top10)>0) write.xlsx(file=gfile,x=top10,sheetName = "New ndeals top100", append = T, showNA = F)
 
 #----------------------------------------------------------------------------------------------
 #4# analyze by city
@@ -550,8 +558,8 @@ write.xlsx(file=gfile,x=top10,sheetName = "New ndeals top100", append = T, showN
 storeb=group_by(storeb,city)
 bywhat="city"
 groupsmr=storeanalyze(storeb,storepre,bywhat)
-as.data.frame(groupsmr)
-table(store$city)
+head(as.data.frame(groupsmr))
+#table(store$city)
 
 groupsmr=ungroup(groupsmr)
 groupsmr=arrange(groupsmr,desc(nstore))
@@ -609,18 +617,20 @@ write.xlsx(file=gfile,x=groupsmr,sheetName = bywhat, append = T, showNA = F)
 head(tuan)
 table(tuan$date)
 head(glasttuan)
-tuan=distinct(tuan, date, gid)
+tuan=distinct(arrange(tuan,desc(date)), date, gid)
 
 #----------------------------------------------------------------------------------------------
 # Define the Macros Variables
-(previous=max(glasttuan$date))
+#(previous=max(glasttuan$date))
+(previous)
 (gdate=unique(tuan$date))
+(gdate=gdate[order(as.integer(gdate))])
 (gnperiod=length(gdate))
 (gstatus=factor(c("classical","new","offshelf"),levels=c("classical","new","offshelf")))
 (gcol=paste("m", 1:gnperiod, sep=""))
 (gcolx=paste("m", 1:gnperiod, ".x", sep=""))
 (gcoly=paste("m", 1:gnperiod, ".y", sep=""))
-(gfile=paste(previous+1,"to",max(gdate),"MoGuJie tuan Analysis By JX @", Sys.Date(),".xlsx",sep = " "))
+(gfile=paste(last(previous)+1,"to",max(gdate),"MoGuJie tuan Analysis By JX @", Sys.Date(),".xlsx",sep = " "))
 #tuan
 
 
@@ -638,7 +648,9 @@ tuan_cast=function(tuan, x, glasttuan){
   xlist=left_join(xlist,glasttuan[,c("gid", "date", x)],by=c("gid"="gid"))
   names(xlist)=c("gid",gcol,"lastdate","m0")
   xlist=select(xlist,gid,m0,starts_with("m"),lastdate)
-  xlist$numna=apply(xlist[,gcol],1,n_na)
+  xlist$numna=NA
+  if (gnperiod==1) xlist$numna=as.integer(is.na(xlist[,gcol]))
+  else xlist$numna=apply(xlist[,gcol],1,n_na)
 
   if (x=="price") xlist[,"price"]= apply(xlist[,c("m0",gcol)],1, function(y){return(mean(y ,na.rm=T))})
   else {
@@ -664,17 +676,13 @@ price_equal=as.data.frame(apply(select(pricelist,starts_with("m")), 1, function(
   if (all(mean(x, na.rm=T)==x[!is.na(x)], na.rm=T)) return (3)
   else {print(4);print(x);return(4)}
 }))
-sum(price_equal==4)
+sum(price_equal==gnperiod)
 dim(price_equal)
 
 table(dealist$numna)
 table(pricelist$numna)
 if (any(pricelist$numna==gnperiod)) {print("Error: all price is NA")}
 if (any(dealist$numna==gnperiod)) {print("Error: all sales is NA")}
-
-head(pricelist,10)
-head(dealist,10)
-
 
 #----------------------------------------------------------------------------------------------
 #3 calculate the GMV and deal for SKU
@@ -689,7 +697,7 @@ head(dealist)
 dealist$status=gstatus[1]
 dealist[which(!(dealist$gid %in% glasttuan$gid)),"status"]=gstatus[2]
 table(dealist$status)
-tuanp=filter(glasttuan, date==previous)
+tuanp=filter(glasttuan, date %in% previous)
 dim(tuanp)
 tuanp$status=gstatus[1]
 tuanp[which(!(tuanp$gid %in% dealist$gid)),"status"]=gstatus[3]
